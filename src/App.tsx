@@ -6,10 +6,7 @@ import {
   ArrowUpDown,
   Euro,
   Info,
-  FileSpreadsheet,
-  Download,
 } from 'lucide-react';
-import { generateInsuranceExcelFile } from './utils/excelExport';
 
 export default function App() {
   // Type de franchise : 'variable' ou 'fixe'
@@ -128,46 +125,18 @@ export default function App() {
     }).format(val || 0);
   };
 
-  const handleDownloadExcel = () => {
-    generateInsuranceExcelFile({
-      expertiseAmount: parsedExpertise,
-      franchiseType,
-      fixedAmount: parsedFixed,
-      baseAmount: baseUtilisee,
-      ratePercent: rateUtilise,
-      maxCap: maxUtilise,
-      hasMaxCap: hasMaxUtilise,
-      degressivityRate: effectiveDegressivity,
-      franchiseFinale,
-      partAssureur,
-    });
-  };
-
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-center items-center p-3 sm:p-6 text-slate-800">
       <div className="w-full max-w-xl bg-white rounded-2xl shadow-lg border border-slate-200 overflow-hidden">
         
-        {/* En-tête sobre et épuré avec bouton Télécharger Excel */}
-        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
-              <Shield className="w-5 h-5" />
-            </div>
-            <h1 className="text-lg font-bold text-slate-900 font-display">
-              Calculateur de Franchise Sinistre
-            </h1>
+        {/* En-tête sobre et épuré (titre uniquement) */}
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-bold shadow-xs shrink-0">
+            <Shield className="w-5 h-5" />
           </div>
-
-          <button
-            type="button"
-            onClick={handleDownloadExcel}
-            title="Télécharger la version Excel (.xlsx) avec formules automatiques"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 transition-colors shadow-2xs cursor-pointer shrink-0"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
-            <span>Excel (.xlsx)</span>
-            <Download className="w-3.5 h-3.5 text-emerald-600" />
-          </button>
+          <h1 className="text-lg font-bold text-slate-900 font-display">
+            Calculateur de Franchise Sinistre
+          </h1>
         </div>
 
         {/* Corps principal : Saisie des données */}

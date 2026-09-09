@@ -1,164 +1,144 @@
 import * as XLSX from 'xlsx';
+import { FranchiseConfig, CalculationResult, SavedDossier } from '../types';
+import { calculateFranchise } from './calculator';
 
-export interface ExcelExportParams {
-  expertiseAmount: number;
-  franchiseType: 'variable' | 'fixe';
-  fixedAmount: number;
-  baseAmount: number;
-  ratePercent: number;
-  maxCap: number;
-  hasMaxCap: boolean;
-  degressivityRate: number; // e.g. 10, 20, 30, 40, 50, or 0
-  franchiseFinale: number;
-  partAssureur: number;
-}
-
-export function generateInsuranceExcelFile(params: ExcelExportParams) {
+export function exportToExcel(
+  config: FranchiseConfig,
+  currentResult: CalculationResult,
+  savedDossiers: SavedDossier[] = []
+) {
   const wb = XLSX.utils.book_new();
 
-  // ==========================================
-  // FEUILLE 1 : CALCULATEUR PROPORTIONNEL DYNAMIQUE
-  // ==========================================
-  const s1Data: (string | number)[][] = [
-    ['CALCULATEUR DE FRANCHISE SINISTRE - MODÈLE OFFICIEL'],
-    ['Ce fichier contient les formules automatiques pour le calcul de franchise assurance.'],
+  // 1. Feuille Principale : "Calculateur Franchise"
+  const isVar = config.franchiseType === 'variable';
+  const mainSheetData: (string | number)[][] = [
+    ['CALCUL DE FRANCHISE DÉGRESSIVE D’ASSURANCE'],
+    ['Généré automatiquement via le Calculateur Expert'],
     [],
-    ['1. PARAMÈTRES DU DOSSIER (À SAISIR)', 'VALEUR', 'UNITÉ / AIDE'],
-    ['Montant des réparations / Rapport d’expertise', params.expertiseAmount || 1500, 'EUR TTC'],
-    ['Base fixe de la franchise', params.baseAmount || 88, 'EUR'],
-    ['Pourcentage applicable', (params.ratePercent || 8) / 100, '%'],
-    ['Plafond maximum (0 si aucun)', params.hasMaxCap ? (params.maxCap || 208) : 0, 'EUR (0 si sans max)'],
-    ['Taux de dégressivité', (params.degressivityRate || 0) / 100, '% (ex: 10%, 20%, 30%...)'],
-    [],
-    ['2. RÉSULTATS DU CALCUL AUTOMATIQUE', 'FORMULE EXCEL', 'MONTANT (€)'],
-    ['Base fixe appliquée', '=B6', 0],
-    ['Part proportionnelle calculée', '=ROUND(B5*B7, 2)', 0],
-    ['Sous-total avant plafond', '=B12+B13', 0],
-    ['Franchise brute (après plafond éventuel)', '=IF(B8>0, MIN(B8, B14), B14)', 0],
-    ['Économie accordée par la dégressivité', '=ROUND(B15*B9, 2)', 0],
-    ['FRANCHISE NETTE À DÉDUIRE', '=ROUND(B15*(1-B9), 2)', 0],
-    ['PRISE EN CHARGE COMPAGNIE', '=MAX(0, B5-B17)', 0],
+    ['PARAMÈTRES DU DOSSIER', 'VALEUR', 'UNITÉ / DÉTAIL'],
+    ["Montant du rapport d'expertise", config.expertiseAmount, '€'],
+    ['Type de franchise', isVar ? 'Variable / Proportionnelle' : 'Fixe', ''],
   ];
 
-  const ws1 = XLSX.utils.aoa_to_sheet(s1Data);
+  if (isVar) {
+    mainSheetData.push(
+      ['Base fixe franchise', config.variableBase, '€'],
+      ["Taux sur montant d'expertise", config.variableRate / 100, '%'],
+      ['Plafond maximum', config.hasMaxCap ? config.maxCap : 'Sans plafond', config.hasMaxCap ? '€' : ''],
+      ['Formule brute appliquée', `Base (${config.variableBase}€) + ${config.variableRate}% * Expertise [Max: ${config.maxCap}€]`, '']
+    );
+  } else {
+    mainSheetData.push(
+      ['Montant de la franchise fixe', config.fixedAmount, '€']
+    );
+  }
 
-  // Set formulas properly for SheetJS
-  ws1['C12'] = { t: 'n', f: 'B6' };
-  ws1['C13'] = { t: 'n', f: 'ROUND(B5*B7, 2)' };
-  ws1['C14'] = { t: 'n', f: 'C12+C13' };
-  ws1['C15'] = { t: 'n', f: 'IF(B8>0, MIN(B8, C14), C14)' };
-  ws1['C16'] = { t: 'n', f: 'ROUND(C15*B9, 2)' };
-  ws1['C17'] = { t: 'n', f: 'ROUND(C15*(1-B9), 2)' };
-  ws1['C18'] = { t: 'n', f: 'MAX(0, B5-C17)' };
-
-  ws1['!cols'] = [{ wch: 44 }, { wch: 22 }, { wch: 26 }];
-  XLSX.utils.book_append_sheet(wb, ws1, 'Franchise Proportionnelle');
-
-  // ==========================================
-  // FEUILLE 2 : CALCULATEUR FRANCHISE FIXE
-  // ==========================================
-  const s2Data: (string | number)[][] = [
-    ['CALCULATEUR DE FRANCHISE FIXE AVEC DÉGRESSIVITÉ'],
+  mainSheetData.push(
+    ['Taux de dégressivité sélectionné', config.degressivityRate / 100, '%'],
     [],
-    ['PARAMÈTRES DU DOSSIER', 'VALEUR', 'UNITÉ'],
-    ['Montant des réparations', params.expertiseAmount || 1500, 'EUR TTC'],
-    ['Franchise contractuelle fixe', params.fixedAmount || 300, 'EUR'],
-    ['Taux de dégressivité', (params.degressivityRate || 0) / 100, '% (10%, 20%, 30%...)'],
+    ['RÉSULTATS FINANCIERS', 'MONTANT (€)', 'PART DU DOMMAGE'],
+    ['Franchise brute initiale', currentResult.franchiseBrute, ''],
+    ['Économie dégressivité (réduction)', currentResult.degressivityDiscount, `${config.degressivityRate}% de réduction`],
+    ['FRANCHISE NETTE À PAYER (ASSURÉ)', currentResult.franchiseNette, `${currentResult.tauxResteACharge.toFixed(2)} %`],
+    ['PRISE EN CHARGE COMPAGNIE', currentResult.partAssureur, `${(100 - currentResult.tauxResteACharge).toFixed(2)} %`],
     [],
-    ['RÉSULTATS', 'FORMULE EXCEL', 'MONTANT (€)'],
-    ['Franchise brute contractuelle', '=B5', 0],
-    ['Réduction dégressivité', '=ROUND(B5*B6, 2)', 0],
-    ['FRANCHISE NETTE À RETENIR', '=ROUND(B5*(1-B6), 2)', 0],
-    ['INDEMNITÉ COMPAGNIE', '=MAX(0, B4-C11)', 0],
+    ['FORMULE EXCEL ASSOCIÉE', '', ''],
+    [
+      'Formule directe :',
+      isVar
+        ? `=MIN(${config.hasMaxCap ? config.maxCap : 99999}; ${config.variableBase} + ${config.variableRate}% * B5) * (1 - B10)`
+        : `=${config.fixedAmount} * (1 - B10)`,
+      'Prend en compte la base, le % et la dégressivité'
+    ]
+  );
+
+  const wsMain = XLSX.utils.aoa_to_sheet(mainSheetData);
+
+  // Styling column widths
+  wsMain['!cols'] = [
+    { wch: 38 },
+    { wch: 20 },
+    { wch: 45 },
   ];
 
-  const ws2 = XLSX.utils.aoa_to_sheet(s2Data);
-  ws2['C9'] = { t: 'n', f: 'B5' };
-  ws2['C10'] = { t: 'n', f: 'ROUND(B5*B6, 2)' };
-  ws2['C11'] = { t: 'n', f: 'ROUND(B5*(1-B6), 2)' };
-  ws2['C12'] = { t: 'n', f: 'MAX(0, B4-C11)' };
+  XLSX.utils.book_append_sheet(wb, wsMain, 'Calculateur');
 
-  ws2['!cols'] = [{ wch: 38 }, { wch: 20 }, { wch: 24 }];
-  XLSX.utils.book_append_sheet(wb, ws2, 'Franchise Fixe');
-
-  // ==========================================
-  // FEUILLE 3 : BARÈME COMPARATIF DE DÉGRESSIVITÉ (0% à 50%)
-  // ==========================================
-  const base = params.baseAmount || 88;
-  const pct = (params.ratePercent || 8) / 100;
-  const max = params.hasMaxCap ? (params.maxCap || 208) : 999999;
-  const rep = params.expertiseAmount || 1500;
-
-  const rawGross = Math.min(max, base + rep * pct);
-
-  const rates = [0, 10, 20, 30, 40, 50];
-  const s3Data: (string | number)[][] = [
-    ['SIMULATION COMPARATIVE - BARÈMES DE DÉGRESSIVITÉ (0% À 50%)'],
-    [`Pour un rapport de réparations de ${rep} € TTC (Règle : ${base}€ + ${params.ratePercent || 8}%, max ${params.hasMaxCap ? `${params.maxCap}€` : 'aucun'})`],
+  // 2. Feuille : "Barème Dégressivité 5% à 9%"
+  const rates = [0, 5, 6, 7, 8, 9, 10, 15];
+  const baremeData: (string | number)[][] = [
+    [`SIMULATION COMPARATIVE POUR UN RAPPORT DE ${config.expertiseAmount} €`],
+    [`Type : ${isVar ? `Variable (${config.variableBase}€ + ${config.variableRate}%, max ${config.maxCap}€)` : `Fixe (${config.fixedAmount}€)`}`],
     [],
     [
       'Taux Dégressivité',
       'Franchise Brute (€)',
       'Réduction (€)',
       'Franchise Nette (€)',
-      'Prise en charge Compagnie (€)',
-      'Économie réalisée (€)',
+      'Prise en charge Assureur (€)',
+      'Économie vs Sans dégressivité (€)',
+      '% Reste à charge'
     ],
   ];
 
-  rates.forEach((r) => {
-    const discount = Math.round(rawGross * (r / 100) * 100) / 100;
-    const net = Math.round((rawGross - discount) * 100) / 100;
-    const comp = Math.max(0, Math.round((rep - net) * 100) / 100);
-    const ecoVsZero = discount;
+  rates.forEach((rate) => {
+    const res = calculateFranchise({ ...config, degressivityRate: rate });
+    const zeroRes = calculateFranchise({ ...config, degressivityRate: 0 });
+    const economie = zeroRes.franchiseNette - res.franchiseNette;
 
-    s3Data.push([
-      r === 0 ? '0% (Standard)' : `${r} %`,
-      rawGross,
-      discount,
-      net,
-      comp,
-      ecoVsZero,
+    baremeData.push([
+      rate === 0 ? '0% (Standard)' : `${rate} %`,
+      Number(res.franchiseBrute.toFixed(2)),
+      Number(res.degressivityDiscount.toFixed(2)),
+      Number(res.franchiseNette.toFixed(2)),
+      Number(res.partAssureur.toFixed(2)),
+      Number(economie.toFixed(2)),
+      `${res.tauxResteACharge.toFixed(1)} %`
     ]);
   });
 
-  const ws3 = XLSX.utils.aoa_to_sheet(s3Data);
-  ws3['!cols'] = [
-    { wch: 22 },
+  const wsBareme = XLSX.utils.aoa_to_sheet(baremeData);
+  wsBareme['!cols'] = [
+    { wch: 20 },
     { wch: 22 },
     { wch: 18 },
     { wch: 22 },
     { wch: 28 },
-    { wch: 24 },
+    { wch: 32 },
+    { wch: 20 },
   ];
-  XLSX.utils.book_append_sheet(wb, ws3, 'Barème Dégressivité 0-50%');
+  XLSX.utils.book_append_sheet(wb, wsBareme, 'Barème 5% à 9%');
 
-  // ==========================================
-  // FEUILLE 4 : MATRICE MULTI-MONTANTS D'EXPERTISE
-  // ==========================================
-  const sampleDamages = [500, 800, 1000, 1200, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000];
-  const s4Data: (string | number)[][] = [
-    ['MATRICE MULTI-MONTANTS - FRANCHISE NETTE SELON LES RÉPARATIONS'],
-    [`Règle appliquée : Base ${base} € + ${params.ratePercent || 8} % (Plafond Max : ${params.hasMaxCap ? `${params.maxCap} €` : 'Aucun'})`],
+  // 3. Feuille : "Matrice Multi-Montants"
+  const sampleAmounts = [500, 1000, 1500, 2000, 2500, 3000, 4000, 5000, 6000];
+  const matrixData: (string | number)[][] = [
+    ['MATRICE MULTI-MONTANTS (FRANCHISE NETTE EN FONCTION DU RAPPORT ET DE LA DÉGRESSIVITÉ)'],
+    ['Base de calcul : ' + (isVar ? `Variable (${config.variableBase}€ + ${config.variableRate}%, max ${config.maxCap}€)` : `Fixe (${config.fixedAmount}€)`)],
     [],
-    ['Montant Dommages (€)', '0% (Sans dég.)', 'Dég. 10%', 'Dég. 20%', 'Dég. 30%', 'Dég. 40%', 'Dég. 50%'],
+    ['Montant Expertise (€)', 'Sans dég. (0%)', 'Dég. 5%', 'Dég. 6%', 'Dég. 7%', 'Dég. 8%', 'Dég. 9%']
   ];
 
-  sampleDamages.forEach((amt) => {
-    const raw = Math.min(max, base + amt * pct);
-    s4Data.push([
+  sampleAmounts.forEach((amt) => {
+    const baseCfg = { ...config, expertiseAmount: amt };
+    const f0 = calculateFranchise({ ...baseCfg, degressivityRate: 0 }).franchiseNette;
+    const f5 = calculateFranchise({ ...baseCfg, degressivityRate: 5 }).franchiseNette;
+    const f6 = calculateFranchise({ ...baseCfg, degressivityRate: 6 }).franchiseNette;
+    const f7 = calculateFranchise({ ...baseCfg, degressivityRate: 7 }).franchiseNette;
+    const f8 = calculateFranchise({ ...baseCfg, degressivityRate: 8 }).franchiseNette;
+    const f9 = calculateFranchise({ ...baseCfg, degressivityRate: 9 }).franchiseNette;
+
+    matrixData.push([
       amt,
-      Math.round(raw * 100) / 100,
-      Math.round(raw * 0.9 * 100) / 100,
-      Math.round(raw * 0.8 * 100) / 100,
-      Math.round(raw * 0.7 * 100) / 100,
-      Math.round(raw * 0.6 * 100) / 100,
-      Math.round(raw * 0.5 * 100) / 100,
+      Number(f0.toFixed(2)),
+      Number(f5.toFixed(2)),
+      Number(f6.toFixed(2)),
+      Number(f7.toFixed(2)),
+      Number(f8.toFixed(2)),
+      Number(f9.toFixed(2)),
     ]);
   });
 
-  const ws4 = XLSX.utils.aoa_to_sheet(s4Data);
-  ws4['!cols'] = [
+  const wsMatrix = XLSX.utils.aoa_to_sheet(matrixData);
+  wsMatrix['!cols'] = [
     { wch: 24 },
     { wch: 16 },
     { wch: 14 },
@@ -167,9 +147,62 @@ export function generateInsuranceExcelFile(params: ExcelExportParams) {
     { wch: 14 },
     { wch: 14 },
   ];
-  XLSX.utils.book_append_sheet(wb, ws4, 'Grille Multi-Montants');
+  XLSX.utils.book_append_sheet(wb, wsMatrix, 'Grille Multi-Montants');
 
-  // Déclencher le téléchargement du fichier .xlsx
-  const filename = `calculateur-franchise-sinistre-${new Date().toISOString().slice(0, 10)}.xlsx`;
+  // 4. Feuille : "Dossiers Enregistrés" (si existants)
+  if (savedDossiers.length > 0) {
+    const dossiersData: (string | number)[][] = [
+      ['HISTORIQUE DES DOSSIERS DE SINISTRE / EXPERTISE'],
+      [],
+      [
+        'Réf. Dossier',
+        'Date',
+        'Client / Assuré',
+        'Véhicule / Objet',
+        'Montant Expertise (€)',
+        'Type',
+        'Taux Dégressivité',
+        'Franchise Brute (€)',
+        'Réduction (€)',
+        'Franchise Nette (€)',
+        'Prise en charge Assureur (€)'
+      ]
+    ];
+
+    savedDossiers.forEach((d) => {
+      dossiersData.push([
+        d.reference,
+        d.date,
+        d.clientName || 'N/A',
+        d.vehicleOrClaim || 'N/A',
+        d.config.expertiseAmount,
+        d.config.franchiseType === 'variable' ? 'Variable' : 'Fixe',
+        `${d.config.degressivityRate} %`,
+        Number(d.result.franchiseBrute.toFixed(2)),
+        Number(d.result.degressivityDiscount.toFixed(2)),
+        Number(d.result.franchiseNette.toFixed(2)),
+        Number(d.result.partAssureur.toFixed(2))
+      ]);
+    });
+
+    const wsDossiers = XLSX.utils.aoa_to_sheet(dossiersData);
+    wsDossiers['!cols'] = [
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 22 },
+      { wch: 20 },
+      { wch: 22 },
+      { wch: 14 },
+      { wch: 18 },
+      { wch: 20 },
+      { wch: 16 },
+      { wch: 20 },
+      { wch: 26 },
+    ];
+    XLSX.utils.book_append_sheet(wb, wsDossiers, 'Historique Dossiers');
+  }
+
+  // Écriture et téléchargement
+  const filename = `calcul-franchise-degressive-${Date.now().toString().slice(-6)}.xlsx`;
   XLSX.writeFile(wb, filename);
 }
