@@ -1,0 +1,6 @@
+{
+  "name": "Calculateur de Franchise Dégressive",
+  "description": "Calculateur simple et rapide de franchise d'assurance dégressive (fixe ou variable) avec barèmes de dégressivité.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
